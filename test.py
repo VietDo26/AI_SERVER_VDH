@@ -18,7 +18,7 @@ def send_request():
 
     # response = requests.post(url, headers=headers, data=json.dumps(data))
     response = requests.post(url, headers=headers, data=data)
-    if response.status_code == 200:
+    if response.status_code == 201:
         print("Request was successful.")
         print("Response:", response.json())
     else:

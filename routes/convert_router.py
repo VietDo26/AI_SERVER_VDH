@@ -315,29 +315,21 @@ async def convertvideodeepfake_back_ground( user_id:int,
             for image in image_file_paths:
                 command.append("--source")
                 command.append(image)
-            result = subprocess.run(command)
+            background_tasks.add_task(heavy_task,
+                                      command = command, 
+                                      user_id = user_id, 
+                                      user_name = user_name, 
+                                      role_id = role_id, 
+                                      image_file_paths = file_path_image, 
+                                      file_path_video = file_path_video,
+                                      audio_file_paths = None,
+                                      output = output,
+                                      output_with_voice = None,
+                                      output_final = output_final,
+                                      type =  "video deepfake with voice"
+                                      )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
-
-        output_with_voice = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_withvoice'+video.filename[index_video:]
-        create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= output , output_path_video=output_with_voice)
-        
-        # insert_data_into_database()
-        output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_withvoice_final'+video.filename[index_video:]
-        concatenateWarning(video_path=output_with_voice,output_path= output_final)
-        print("with voice")
-        link_url = f'/convertfile/filevideo/?path={output_final}'
-        
-        None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
-        size_file, duration =  get_file_size_and_duration(output_final)
-        insert_data_into_media_table(user_id=user_id,
-            type='video deepfake with voice', 
-            input_image_path=str(image_file_paths),
-            input_video_path=file_path_video, 
-            input_voice_path=str(audio_file_paths), 
-            output_video_path=output, 
-            size=size_file, 
-            time=duration)
         
     else:
         print("without voice")
@@ -393,60 +385,13 @@ async def convertvideodeepfake_back_ground( user_id:int,
                                       audio_file_paths = None,
                                       output = output,
                                       output_with_voice = None,
-                                      output_final = output_final
+                                      output_final = output_final,
+                                      type = "video deepfake without voice"
                                       )
             # result = subprocess.run(command)    
         except Exception as e:
             raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')     
     return "received a request to create a deepfake video"
-
-def heavy_task(command, user_id, user_name, role_id, image_file_paths, file_path_video, audio_file_paths ,output,output_with_voice, output_final,type):
-    if type == "video deepfake without voice":
-        result = subprocess.run(command)
-        concatenateWarning(video_path=output,output_path= output_final)
-        link_url = f'/convertfile/filevideo/?path={output_final}'
-        None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
-        size_file, duration =  get_file_size_and_duration(output_final)
-        insert_data_into_media_table(user_id=user_id,
-            type='video deepfake with voice', 
-            input_image_path=str(image_file_paths),
-            input_video_path=file_path_video, 
-            input_voice_path=audio_file_paths, 
-            output_video_path=output, 
-            size=size_file, 
-            time=duration)
-        print(link_url)
-    elif type == "video deepfake with voice" :
-        create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= output , output_path_video=output_with_voice)
-        concatenateWarning(video_path=output_with_voice,output_path= output_final)
-        print("with voice")
-        link_url = f'/convertfile/filevideo/?path={output_final}'
-        None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
-        size_file, duration =  get_file_size_and_duration(output_final)
-        insert_data_into_media_table(user_id=user_id,
-            type='video deepfake with voice', 
-            input_image_path=str(image_file_paths),
-            input_video_path=file_path_video, 
-            input_voice_path=str(audio_file_paths), 
-            output_video_path=output, 
-            size=size_file, 
-            time=duration)
-        print(link_url)
-    elif type == "Video convert own voice":
-        create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= file_path_video,output_path_video=output)
-        concatenateWarning(video_path=output,output_path= output_final)
-        link_url = f'/convertfile/filevideo/?path={output_final}'
-        None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
-        size_file, duration =  get_file_size_and_duration(output_final)
-        insert_data_into_media_table(user_id=user_id,
-            type='Video convert own voice', 
-            input_image_path=None,
-            input_video_path=file_path_video, 
-            input_voice_path=audio_file_paths, 
-            output_video_path=output, 
-            size=size_file, 
-            time=duration)
-        print(link_url)
 
 @router.post("/convertvoice_with_owned_voice/")
 async def convertvideo_with_owned_voice( user_id: int,
