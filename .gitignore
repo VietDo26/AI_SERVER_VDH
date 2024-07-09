@@ -1,0 +1,13 @@
+
+/.assets
+/__pycache__
+/facefusion
+/media
+/routes/__pycache__
+/config/__pycache__
+/middleware/__pycache__
+/schemas/__pycache__
+/utils/__pycache__
+/utils/database/__pycache__
+/utils/videoprocessing/__pycache__
+/voice/__pycache__
