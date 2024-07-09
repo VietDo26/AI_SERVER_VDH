@@ -47,7 +47,7 @@ def is_gpu_available():
 @router.post("/convertvideodeepfake/")
 async def convertvideodeepfake( user_id:int,
                                user_name:str, 
-                               role_id:str,
+                               role_id:int,
                                 images: typing.List[UploadFile] = File(...),
                                 video: UploadFile = File(...),
                                 audios: typing.List[UploadFile] = None
@@ -228,7 +228,7 @@ async def convertvideodeepfake( user_id:int,
 @router.post("/convertvideodeepfake_background/")
 async def convertvideodeepfake_back_ground( user_id:int,
                                user_name:str, 
-                               role_id:str,
+                               role_id:int,
                                 images: typing.List[UploadFile] = File(...),
                                 video: UploadFile = File(...),
                                 audios: typing.List[UploadFile] = None,
@@ -450,8 +450,8 @@ def heavy_task(command, user_id, user_name, role_id, image_file_paths, file_path
 
 @router.post("/convertvoice_with_owned_voice/")
 async def convertvideo_with_owned_voice( user_id: int,
-                                        user_name=str, 
-                                        role_id=int,
+                                        user_name:str, 
+                                        role_id:int,
                                         video: UploadFile = File(...),
                                         audios: typing.List[UploadFile] = File(...)
                        ):
@@ -518,8 +518,8 @@ async def convertvideo_with_owned_voice( user_id: int,
 
 @router.post("/convertvoice_with_owned_voice_background/")
 async def convertvideo_with_owned_voice_background( user_id: int,
-                                        user_name=str, 
-                                        role_id=int,
+                                        user_name: str, 
+                                        role_id: int,
                                         video: UploadFile = File(...),
                                         audios: typing.List[UploadFile] = File(...),
                                         background_tasks: BackgroundTasks = BackgroundTasks()
@@ -579,8 +579,8 @@ async def convertvideo_with_owned_voice_background( user_id: int,
 
 @router.post("/convertvideo_LipSyncer/")
 async def convertvideo_LipSyncer( user_id:int,
-                        user_name=str, 
-                        role_id=int,
+                        user_name:str, 
+                        role_id:int,
                        audio: UploadFile = File(...),
                        video: UploadFile = File(...)
                        ):
@@ -661,8 +661,8 @@ async def convertvideo_LipSyncer( user_id:int,
     )
 @router.post("/convertvideo_LipSyncer_background/")
 async def convertvideo_LipSyncer_background( user_id:int,
-                        user_name=str, 
-                        role_id=int,
+                        user_name:str, 
+                        role_id:int,
                        audio: UploadFile = File(...),
                        video: UploadFile = File(...),
                        background_tasks: BackgroundTasks = BackgroundTasks()
