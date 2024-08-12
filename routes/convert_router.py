@@ -13,17 +13,20 @@ import GPUtil
 from fastapi import File, UploadFile, HTTPException
 from fastapi.responses import RedirectResponse,  FileResponse
 from utils.database.database import insert_data_into_media_table, insert_data_into_users_table, get_file_size_and_duration, get_url_from_media_table_by_id, check_user_exists
-from utils.videoprocessing.concatenate import concatenateWarning
-from voice.voice import convert_audio_of_video, create_video_with_voice_cloning
+from utils.videoprocessing.concatenate import concatenateWarning, cut_video_focus_audio
+from utils.request.request import send_video_chunked
+from voice.voice import convert_audio_of_video, create_video_with_voice_cloning, delete_voice_by_userid, get_id_voice_by_userid, remove_noise_audio
 from schemas.video_schema import VideoResponse
+
 import time
 
 
 folder_path= str(Path(__file__).parent.parent)
 
-SERVER_MEDIA = ''
-KEY = ''
-
+LINK_SERVER ='https://crisp-labrador-clever.ngrok-free.app'
+KEY = '33828ef4c5e064103aba7abdbad41b05'
+# FINISH_URL = 'https://deepfakesnsapi.azurewebsites.net/api/v1/videodeepfake/finish'
+FINISH_URL = 'https://bat-choice-needlessly.ngrok-free.app/api/v1/videodeepfake/finish'
 router = APIRouter()
 
 from concurrent.futures import ThreadPoolExecutor
@@ -44,184 +47,366 @@ def is_gpu_available():
     gpus = GPUtil.getAvailable()
     return len(gpus) > 0
 
-@router.post("/convertvideodeepfake/")
-async def convertvideodeepfake( user_id:int,
-                               user_name:str, 
-                               role_id:int,
-                                images: typing.List[UploadFile] = File(...),
-                                video: UploadFile = File(...),
-                                audios: typing.List[UploadFile] = None
-                    #    audios: Optional[List[bytes]] = File(None)
-                    #    audios:  List[Union[UploadFile, None]] = File(None)
-                       ) -> VideoResponse:
-    # config
-    output_video_encoder = 'hevc_nvenc'
-    output_video_quality = 100  
-    execution_providers = 'cuda' if is_gpu_available() else 'cpu'
-    face_swapper_model = "inswapper_128_fp16"
+# @router.post("/convertvideodeepfake/")
+# async def convertvideodeepfake( user_id:int,
+#                                user_name:str, 
+#                                role_id:int,
+#                                video_id:int,
+#                                 images: typing.List[UploadFile] = File(...),
+#                                 video: UploadFile = File(...),
+#                                 audios: typing.List[UploadFile] = None
+#                     #    audios: Optional[List[bytes]] = File(None)
+#                     #    audios:  List[Union[UploadFile, None]] = File(None)
+#                        ) -> VideoResponse:
+#     # config
+#     output_video_encoder = 'hevc_nvenc'
+#     output_video_quality = 100  
+#     execution_providers = 'cuda' if is_gpu_available() else 'cpu'
+#     face_swapper_model = "inswapper_128_fp16"
     
-    if not video.content_type.startswith("video/"):
-        raise HTTPException(status_code=400, detail="Only video uploads allowed!")
+#     if not video.content_type.startswith("video/"):
+#         raise HTTPException(status_code=400, detail="Only video uploads allowed!")
 
-    upload_dir_media = os.path.join(folder_path,'media',f'user_id_{user_id:04d}')
-    os.makedirs(upload_dir_media, exist_ok=True)
-    number_order = len(os.listdir(upload_dir_media))
-    upload_dir_media = os.path.join(upload_dir_media,f'{number_order:05d}')
+#     upload_dir_media = os.path.join(folder_path,'media',f'user_id_{user_id:04d}')
+#     os.makedirs(upload_dir_media, exist_ok=True)
+#     number_order = len(os.listdir(upload_dir_media))
+#     upload_dir_media = os.path.join(upload_dir_media,f'{number_order:05d}')
     
 
-    os.makedirs(upload_dir_media, exist_ok=True)
+#     os.makedirs(upload_dir_media, exist_ok=True)
 
-    if audios is not None:
-        print("with voice")
-        # check file and save file audio
-        audio_file_paths = []
-        for index, audio in enumerate(audios) :
-            if not audio.content_type.startswith("audio/"):
-                raise HTTPException(status_code=400, detail="Only audio uploads allowed!")
+#     if audios is not None:
+#         print("with voice")
+#         # check file and save file audio
+#         audio_file_paths = []
+#         for index, audio in enumerate(audios) :
+#             if not audio.content_type.startswith("audio/"):
+#                 raise HTTPException(status_code=400, detail="Only audio uploads allowed!")
             
-            index_audio = audio.filename.rfind('.')
-            file_path_audio = upload_dir_media+f'/audio_{user_id:04d}_{number_order:05d}_{index}'+audio.filename[index_audio:]
-            try:
-                with open(file_path_audio, "wb") as buffer:
-                    content = await audio.read()
-                    buffer.write(content)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed to save audio: {e}")
-            audio_file_paths.append(file_path_audio)
-        # print(upload_dir_media)
+#             index_audio = audio.filename.rfind('.')
+#             file_path_audio = upload_dir_media+f'/audio_{user_id:04d}_{number_order:05d}_{index}'+audio.filename[index_audio:]
+#             try:
+#                 with open(file_path_audio, "wb") as buffer:
+#                     content = await audio.read()
+#                     buffer.write(content)
+#             except Exception as e:
+#                 raise HTTPException(status_code=500, detail=f"Failed to save audio: {e}")
+#             audio_file_paths.append(file_path_audio)
+#         # print(upload_dir_media)
 
-        # check file image and save file image
-        image_file_paths = []
-        for index, image in enumerate(images) :
-            if not image.content_type.startswith("image/"):
-                raise HTTPException(status_code=400, detail="Only image uploads allowed!")
+#         # check file image and save file image
+#         image_file_paths = []
+#         for index, image in enumerate(images) :
+#             if not image.content_type.startswith("image/"):
+#                 raise HTTPException(status_code=400, detail="Only image uploads allowed!")
             
-            index_image = image.filename.rfind('.')
-            file_path_image=upload_dir_media+f'/image_{user_id:04d}_{number_order:05d}_{index}'+image.filename[index_image:]
-            try:
-                pil_img = Image.open(image.file)
-                pil_img.save(file_path_image)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed to save image: {e}")
-            image_file_paths.append(file_path_image)
+#             index_image = image.filename.rfind('.')
+#             file_path_image=upload_dir_media+f'/image_{user_id:04d}_{number_order:05d}_{index}'+image.filename[index_image:]
+#             try:
+#                 pil_img = Image.open(image.file)
+#                 pil_img.save(file_path_image)
+#             except Exception as e:
+#                 raise HTTPException(status_code=500, detail=f"Failed to save image: {e}")
+#             image_file_paths.append(file_path_image)
 
-        # save file video
-        index_video = video.filename.rfind('.')
-        file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
-        try:
-            with open( file_path_video, "wb") as buffer:
-                content = await video.read()
-                buffer.write(content)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
+#         # save file video
+#         index_video = video.filename.rfind('.')
+#         file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#         try:
+#             with open( file_path_video, "wb") as buffer:
+#                 content = await video.read()
+#                 buffer.write(content)
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
 
-        try:
-            output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
-            # print('output :', output)
-            command = [
-                "python3", "run.py", "--headless",
-                "--target", f"{file_path_video}",
-                "--output", f"{output}",
-                "--execution-provider", f"{execution_providers}",
-                "--output-video-encoder", f"{output_video_encoder}",
-                "--frame-processors", "face_swapper", "face_enhancer",
-                "--face-swapper-model", f"{face_swapper_model}",
-                "--output-video-quality", f"{output_video_quality}"
-                ]
-            for image in image_file_paths:
-                command.append("--source")
-                command.append(image)
-            result = subprocess.run(command)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
+#         try:
+#             output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#             output_with_voice = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_withvoice'+video.filename[index_video:]
+#             # print('output :', output)
+#             command = [
+#                 "python3", "run.py", "--headless",
+#                 "--target", f"{file_path_video}",
+#                 "--output", f"{output}",
+#                 "--execution-provider", f"{execution_providers}",
+#                 "--output-video-encoder", f"{output_video_encoder}",
+#                 "--frame-processors", "face_swapper", "face_enhancer",
+#                 "--face-swapper-model", f"{face_swapper_model}",
+#                 "--output-video-quality", f"{output_video_quality}"
+#                 ]
+#             for image in image_file_paths:
+#                 command.append("--source")
+#                 command.append(image)
+#             result = subprocess.run(command)
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
 
-        output_with_voice = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_withvoice'+video.filename[index_video:]
-        create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= output , output_path_video=output_with_voice)
+#         output_with_voice = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_withvoice'+video.filename[index_video:]
+#         create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= output , output_path_video=output_with_voice)
         
-        # insert_data_into_database()
-        output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_withvoice_final'+video.filename[index_video:]
-        concatenateWarning(video_path=output_with_voice,output_path= output_final)
-        print("with voice")
-        link_url = f'/convertfile/filevideo/?path={output_final}'
+#         # insert_data_into_database()
+#         output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_withvoice_final'+video.filename[index_video:]
+#         concatenateWarning(video_path=output_with_voice,output_path= output_final)
+#         print("with voice")
+#         link_url = f'/convertfile/filevideo/?path={output_final}'
         
-        None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
-        size_file, duration =  get_file_size_and_duration(output_final)
-        insert_data_into_media_table(user_id=user_id,
-            type='video deepfake with voice', 
-            input_image_path=str(image_file_paths),
-            input_video_path=file_path_video, 
-            input_voice_path=str(audio_file_paths), 
-            output_video_path=output, 
-            size=size_file, 
-            time=duration)
+#         None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
+#         size_file, duration =  get_file_size_and_duration(output_final)
+#         insert_data_into_media_table(user_id=user_id,
+#             type='video deepfake with voice', 
+#             input_image_path=str(image_file_paths),
+#             input_video_path=file_path_video, 
+#             input_voice_path=str(audio_file_paths), 
+#             output_video_path=output, 
+#             size=size_file, 
+#             time=duration)
         
-    else:
-        print("without voice")
-        # save images
-        image_file_paths = []
-        for index, image in enumerate(images) :
-            if not image.content_type.startswith("image/"):
-                raise HTTPException(status_code=400, detail="Only image uploads allowed!")
+#         create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= output , output_path_video=output_with_voice)
+#         concatenateWarning(video_path=output_with_voice,output_path= output_final)
+#         print("with voice")
+#         link_url = f'/convertfile/filevideo/?path={output_final}'
+#         None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
+#         size_file, duration =  get_file_size_and_duration(output_final)
+#         insert_data_into_media_table(user_id=user_id,
+#             type='video deepfake with voice', 
+#             input_image_path=str(image_file_paths),
+#             input_video_path=file_path_video, 
+#             input_voice_path=str(audio_file_paths), 
+#             output_video_path=output, 
+#             size=size_file, 
+#             time=duration)
+        
+#     else:
+#         print("without voice")
+#         # save images
+#         image_file_paths = []
+#         for index, image in enumerate(images) :
+#             if not image.content_type.startswith("image/"):
+#                 raise HTTPException(status_code=400, detail="Only image uploads allowed!")
             
-            index_image = image.filename.rfind('.')
-            file_path_image=upload_dir_media+f'/image_{user_id:04d}_{number_order:05d}_{index}'+image.filename[index_image:]
-            try:
-                pil_img = Image.open(image.file)
-                pil_img.save(file_path_image)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed to save image: {e}")
-            image_file_paths.append(file_path_image)
+#             index_image = image.filename.rfind('.')
+#             file_path_image=upload_dir_media+f'/image_{user_id:04d}_{number_order:05d}_{index}'+image.filename[index_image:]
+#             try:
+#                 pil_img = Image.open(image.file)
+#                 pil_img.save(file_path_image)
+#             except Exception as e:
+#                 raise HTTPException(status_code=500, detail=f"Failed to save image: {e}")
+#             image_file_paths.append(file_path_image)
 
-        # save video
-        index_video = video.filename.rfind('.')
-        file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
-        try:
-            with open( file_path_video, "wb") as buffer:
-                content = await video.read()
-                buffer.write(content)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
+#         # save video
+#         index_video = video.filename.rfind('.')
+#         file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#         try:
+#             with open( file_path_video, "wb") as buffer:
+#                 content = await video.read()
+#                 buffer.write(content)
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
 
-        try:
-            output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
-            command = [
-                "python3", "run.py", "--headless",
-                "--target", f"{file_path_video}",
-                "--output", f"{output}",
-                "--execution-provider", f"{execution_providers}",
-                "--output-video-encoder", f"{output_video_encoder}",
-                "--frame-processors", "face_swapper", "face_enhancer",
-                "--face-swapper-model", f"{face_swapper_model}",
-                "--output-video-quality", f"{output_video_quality}"
-                ]
-            for image in image_file_paths:
-                command.append("--source")
-                command.append(image)
-            result = subprocess.run(command)    
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
+#         try:
+#             output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#             command = [
+#                 "python3", "run.py", "--headless",
+#                 "--target", f"{file_path_video}",
+#                 "--output", f"{output}",
+#                 "--execution-provider", f"{execution_providers}",
+#                 "--output-video-encoder", f"{output_video_encoder}",
+#                 "--frame-processors", "face_swapper", "face_enhancer",
+#                 "--face-swapper-model", f"{face_swapper_model}",
+#                 "--output-video-quality", f"{output_video_quality}"
+#                 ]
+#             for image in image_file_paths:
+#                 command.append("--source")
+#                 command.append(image)
+#             result = subprocess.run(command)    
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
         
-        output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_final'+video.filename[index_video:]
-        concatenateWarning(video_path=output,output_path= output_final)
-        # print("without voice")
-        link_url = f'/convertfile/filevideo/?path={output_final}'
+#         output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_final'+video.filename[index_video:]
+#         concatenateWarning(video_path=output,output_path= output_final)
+#         # print("without voice")
+#         link_url = f'/convertfile/filevideo/?path={output_final}'
         
-        None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
-        size_file, duration =  get_file_size_and_duration(output_final)
-        insert_data_into_media_table(user_id=user_id,
-            type='video deepfake without voice', 
-            input_image_path=str(image_file_paths),
-            input_video_path=file_path_video, 
-            input_voice_path=None, 
-            output_video_path=output, 
-            size=size_file, 
-            time=duration)
-    return VideoResponse(
-        userId= f"{user_id}",
-        videoUrl= f"{link_url}",
-        size= size_file
-    )
+#         None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
+#         size_file, duration =  get_file_size_and_duration(output_final)
+#         insert_data_into_media_table(user_id=user_id,
+#             type='video deepfake without voice', 
+#             input_image_path=str(image_file_paths),
+#             input_video_path=file_path_video, 
+#             input_voice_path=None, 
+#             output_video_path=output, 
+#             size=size_file, 
+#             time=duration)
+#     return VideoResponse(
+#         userId= f"{user_id}",
+#         videoUrl= f"{link_url}",
+#         size= size_file
+#     )
 
+# @router.post("/convertvideodeepfake_background_test/")
+# async def convertvideodeepfake_back_ground_test( user_id:int,
+#                                user_name:str, 
+#                                role_id:int,
+#                                video_id:int,
+#                                 images: typing.List[UploadFile] = File(...),
+#                                 video: UploadFile = File(...),
+#                                 audios: typing.List[UploadFile] = None,
+#                                 background_tasks: BackgroundTasks = BackgroundTasks()
+#                        ):            
+#     output_video_encoder = 'hevc_nvenc'
+#     output_video_quality = 100  
+#     execution_providers = 'cuda' if is_gpu_available() else 'cpu'
+#     face_swapper_model = "inswapper_128_fp16"
+    
+#     if not video.content_type.startswith("video/"):
+#         raise HTTPException(status_code=400, detail="Only video uploads allowed!")
+
+#     upload_dir_media = os.path.join(folder_path,'media',f'user_id_{user_id:04d}')
+#     os.makedirs(upload_dir_media, exist_ok=True)
+#     number_order = len(os.listdir(upload_dir_media))
+#     upload_dir_media = os.path.join(upload_dir_media,f'{number_order:05d}')
+    
+
+#     os.makedirs(upload_dir_media, exist_ok=True)
+
+#     if audios is not None:
+#         print("received data with audios")
+#         # check file and save file audio
+#         audio_file_paths = []
+#         for index, audio in enumerate(audios) :
+#             if not audio.content_type.startswith("audio/"):
+#                 raise HTTPException(status_code=400, detail="Only audio uploads allowed!")
+            
+#             index_audio = audio.filename.rfind('.')
+#             file_path_audio = upload_dir_media+f'/audio_{user_id:04d}_{number_order:05d}_{index}'+audio.filename[index_audio:]
+#             try:
+#                 with open(file_path_audio, "wb") as buffer:
+#                     content = await audio.read()
+#                     buffer.write(content)
+#             except Exception as e:
+#                 raise HTTPException(status_code=500, detail=f"Failed to save audio: {e}")
+#             audio_file_paths.append(file_path_audio)
+#         # print(upload_dir_media)
+
+#         # check file image and save file image
+#         image_file_paths = []
+#         for index, image in enumerate(images) :
+#             if not image.content_type.startswith("image/"):
+#                 raise HTTPException(status_code=400, detail="Only image uploads allowed!")
+            
+#             index_image = image.filename.rfind('.')
+#             file_path_image=upload_dir_media+f'/image_{user_id:04d}_{number_order:05d}_{index}'+image.filename[index_image:]
+#             try:
+#                 pil_img = Image.open(image.file)
+#                 pil_img.save(file_path_image)
+#             except Exception as e:
+#                 raise HTTPException(status_code=500, detail=f"Failed to save image: {e}")
+#             image_file_paths.append(file_path_image)
+
+#         # save file video
+#         index_video = video.filename.rfind('.')
+#         file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#         try:
+#             with open( file_path_video, "wb") as buffer:
+#                 content = await video.read()
+#                 buffer.write(content)
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
+
+#         try:
+#             output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#             output_with_voice = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_withvoice'+video.filename[index_video:]
+#             output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_withvoice_final'+video.filename[index_video:]
+#             # print('output :', output)
+#             command = [
+#                 "python3", "run.py", "--headless",
+#                 "--target", f"{file_path_video}",
+#                 "--output", f"{output}",
+#                 "--execution-provider", f"{execution_providers}",
+#                 "--output-video-encoder", f"{output_video_encoder}",
+#                 "--frame-processors", "face_swapper", "face_enhancer",
+#                 "--face-swapper-model", f"{face_swapper_model}",
+#                 "--output-video-quality", f"{output_video_quality}"
+#                 ]
+#             for image in image_file_paths:
+#                 command.append("--source")
+#                 command.append(image)
+#             # background_tasks.add_task(heavy_task,
+#             #                           command = command, 
+#             #                           user_id = user_id, 
+#             #                           user_name = user_name, 
+#             #                           role_id = role_id, 
+#             #                           image_file_paths = file_path_image, 
+#             #                           file_path_video = file_path_video,
+#             #                           audio_file_paths = audio_file_paths,
+#             #                           output = output,
+#             #                           output_with_voice = output_with_voice,
+#             #                           output_final = output_final,
+#             #                           type =  "video deepfake with voice"
+#             #                           )
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
+        
+#     else:
+#         print("received data without audios")
+#         # save images
+#         image_file_paths = []
+#         for index, image in enumerate(images) :
+#             if not image.content_type.startswith("image/"):
+#                 raise HTTPException(status_code=400, detail="Only image uploads allowed!")
+            
+#             index_image = image.filename.rfind('.')
+#             file_path_image=upload_dir_media+f'/image_{user_id:04d}_{number_order:05d}_{index}'+image.filename[index_image:]
+#             try:
+#                 pil_img = Image.open(image.file)
+#                 pil_img.save(file_path_image)
+#             except Exception as e:
+#                 raise HTTPException(status_code=500, detail=f"Failed to save image: {e}")
+#             image_file_paths.append(file_path_image)
+
+#         # save video
+#         index_video = video.filename.rfind('.')
+#         file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#         try:
+#             with open( file_path_video, "wb") as buffer:
+#                 content = await video.read()
+#                 buffer.write(content)
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
+
+#         try:
+#             output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#             output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_final'+video.filename[index_video:]
+#             command = [
+#                 "python3", "run.py", "--headless",
+#                 "--target", f"{file_path_video}",
+#                 "--output", f"{output}",
+#                 "--execution-provider", f"{execution_providers}",
+#                 "--output-video-encoder", f"{output_video_encoder}",
+#                 "--frame-processors", "face_swapper", "face_enhancer",
+#                 "--face-swapper-model", f"{face_swapper_model}",
+#                 "--output-video-quality", f"{output_video_quality}"
+#                 ]
+#             for image in image_file_paths:
+#                 command.append("--source")
+#                 command.append(image)
+                
+#             # background_tasks.add_task(heavy_task,
+#             #                           command = command, 
+#             #                           user_id = user_id, 
+#             #                           user_name = user_name, 
+#             #                           role_id = role_id, 
+#             #                           image_file_paths = file_path_image, 
+#             #                           file_path_video = file_path_video,
+#             #                           audio_file_paths = None,
+#             #                           output = output,
+#             #                           output_with_voice = None,
+#             #                           output_final = output_final,
+#             #                           type = "video deepfake without voice"
+#             #                           )
+#             # result = subprocess.run(command)    
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')     
+#     return "received a request to create a deepfake video"
 
 
 
@@ -229,6 +414,7 @@ async def convertvideodeepfake( user_id:int,
 async def convertvideodeepfake_back_ground( user_id:int,
                                user_name:str, 
                                role_id:int,
+                               video_id:int,
                                 images: typing.List[UploadFile] = File(...),
                                 video: UploadFile = File(...),
                                 audios: typing.List[UploadFile] = None,
@@ -238,7 +424,7 @@ async def convertvideodeepfake_back_ground( user_id:int,
                        ):
     # config
     output_video_encoder = 'hevc_nvenc'
-    output_video_quality = 100  
+    output_video_quality = 80  
     execution_providers = 'cuda' if is_gpu_available() else 'cpu'
     face_swapper_model = "inswapper_128_fp16"
     
@@ -320,11 +506,12 @@ async def convertvideodeepfake_back_ground( user_id:int,
                                       user_id = user_id, 
                                       user_name = user_name, 
                                       role_id = role_id, 
+                                      video_id = video_id,
                                       image_file_paths = file_path_image, 
                                       file_path_video = file_path_video,
-                                      audio_file_paths = None,
+                                      audio_file_paths = audio_file_paths,
                                       output = output,
-                                      output_with_voice = None,
+                                      output_with_voice = output_with_voice,
                                       output_final = output_final,
                                       type =  "video deepfake with voice"
                                       )
@@ -369,7 +556,10 @@ async def convertvideodeepfake_back_ground( user_id:int,
                 "--output-video-encoder", f"{output_video_encoder}",
                 "--frame-processors", "face_swapper", "face_enhancer",
                 "--face-swapper-model", f"{face_swapper_model}",
-                "--output-video-quality", f"{output_video_quality}"
+                "--output-video-quality", f"{output_video_quality}",
+                # "--face-detector-score" , '0.5',
+                "--face-analyser-gender" , 'female'
+
                 ]
             for image in image_file_paths:
                 command.append("--source")
@@ -380,6 +570,7 @@ async def convertvideodeepfake_back_ground( user_id:int,
                                       user_id = user_id, 
                                       user_name = user_name, 
                                       role_id = role_id, 
+                                      video_id = video_id,
                                       image_file_paths = file_path_image, 
                                       file_path_video = file_path_video,
                                       audio_file_paths = None,
@@ -393,78 +584,79 @@ async def convertvideodeepfake_back_ground( user_id:int,
             raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')     
     return "received a request to create a deepfake video"
 
-@router.post("/convertvoice_with_owned_voice/")
-async def convertvideo_with_owned_voice( user_id: int,
-                                        user_name:str, 
-                                        role_id:int,
-                                        video: UploadFile = File(...),
-                                        audios: typing.List[UploadFile] = File(...)
-                       ):
-    if not video.content_type.startswith("video/"):
-        raise HTTPException(status_code=400, detail="Only video uploads allowed!")
+# @router.post("/convertvoice_with_owned_voice/")
+# async def convertvideo_with_owned_voice( user_id: int,
+#                                         user_name:str, 
+#                                         role_id:int,
+#                                         video: UploadFile = File(...),
+#                                         audios: typing.List[UploadFile] = File(...)
+#                        ):
+#     if not video.content_type.startswith("video/"):
+#         raise HTTPException(status_code=400, detail="Only video uploads allowed!")
 
-    upload_dir_media = os.path.join(folder_path,'media',f'user_id_{user_id:04d}')
-    if not os.path.exists(upload_dir_media):
-        os.makedirs(upload_dir_media)
-    number_order = len(os.listdir(upload_dir_media))
+#     upload_dir_media = os.path.join(folder_path,'media',f'user_id_{user_id:04d}')
+#     if not os.path.exists(upload_dir_media):
+#         os.makedirs(upload_dir_media)
+#     number_order = len(os.listdir(upload_dir_media))
     
-    upload_dir_media = os.path.join(upload_dir_media,f'{number_order:05d}')
-    if not os.path.exists(upload_dir_media):
-        os.makedirs(upload_dir_media)
-    audio_file_paths = []
-    for index, audio in enumerate(audios) :
-        if not audio.content_type.startswith("audio/"):
-            raise HTTPException(status_code=400, detail="Only audio uploads allowed!")
+#     upload_dir_media = os.path.join(upload_dir_media,f'{number_order:05d}')
+#     if not os.path.exists(upload_dir_media):
+#         os.makedirs(upload_dir_media)
+#     audio_file_paths = []
+#     for index, audio in enumerate(audios) :
+#         if not audio.content_type.startswith("audio/"):
+#             raise HTTPException(status_code=400, detail="Only audio uploads allowed!")
         
-        index_audio = audio.filename.rfind('.')
-        file_path_audio = upload_dir_media+f'/audio_{user_id:04d}_{number_order:05d}_{index}'+audio.filename[index_audio:]
-        try:
-            with open(file_path_audio, "wb") as buffer:
-                content = await audio.read()
-                buffer.write(content)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to save audio: {e}")
-        audio_file_paths.append(file_path_audio)
+#         index_audio = audio.filename.rfind('.')
+#         file_path_audio = upload_dir_media+f'/audio_{user_id:04d}_{number_order:05d}_{index}'+audio.filename[index_audio:]
+#         try:
+#             with open(file_path_audio, "wb") as buffer:
+#                 content = await audio.read()
+#                 buffer.write(content)
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=f"Failed to save audio: {e}")
+#         audio_file_paths.append(file_path_audio)
 
-    index_video = video.filename.rfind('.')
-    file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
-    try:
-        with open( file_path_video, "wb") as buffer:
-            content = await video.read()
-            buffer.write(content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
-    try:
-        output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
-        create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= file_path_video,output_path_video=output)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
+#     index_video = video.filename.rfind('.')
+#     file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#     try:
+#         with open( file_path_video, "wb") as buffer:
+#             content = await video.read()
+#             buffer.write(content)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
+#     try:
+#         output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#         create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= file_path_video,output_path_video=output)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
     
     
-    output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_final'+video.filename[index_video:]
-    concatenateWarning(video_path=output,output_path= output_final)
-    link_url = f'/convertfile/filevideo/?path={output_final}'
+#     output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_final'+video.filename[index_video:]
+#     concatenateWarning(video_path=output,output_path= output_final)
+#     link_url = f'/convertfile/filevideo/?path={output_final}'
 
-    None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
-    size_file, duration =  get_file_size_and_duration(output_final)
-    insert_data_into_media_table(user_id=user_id,
-        type='Video convert own voice', 
-        input_image_path=None,
-        input_video_path=file_path_video, 
-        input_voice_path=audio_file_paths, 
-        output_video_path=output, 
-        size=size_file, 
-        time=duration)
-    return VideoResponse(
-        userId= f"{user_id}",
-        videoUrl= f"{link_url}",
-        size = size_file
-    )
+#     None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
+#     size_file, duration =  get_file_size_and_duration(output_final)
+#     insert_data_into_media_table(user_id=user_id,
+#         type='Video convert own voice', 
+#         input_image_path=None,
+#         input_video_path=file_path_video, 
+#         input_voice_path=audio_file_paths, 
+#         output_video_path=output, 
+#         size=size_file, 
+#         time=duration)
+#     return VideoResponse(
+#         userId= f"{user_id}",
+#         videoUrl= f"{link_url}",
+#         size = size_file
+#     )
 
 @router.post("/convertvoice_with_owned_voice_background/")
 async def convertvideo_with_owned_voice_background( user_id: int,
                                         user_name: str, 
                                         role_id: int,
+                                        video_id: int,
                                         video: UploadFile = File(...),
                                         audios: typing.List[UploadFile] = File(...),
                                         background_tasks: BackgroundTasks = BackgroundTasks()
@@ -511,6 +703,7 @@ async def convertvideo_with_owned_voice_background( user_id: int,
                             user_id = user_id, 
                             user_name = user_name, 
                             role_id = role_id, 
+                            video_id = video_id,
                             image_file_paths = None, 
                             file_path_video = file_path_video,
                             audio_file_paths = audio_file_paths,
@@ -522,92 +715,94 @@ async def convertvideo_with_owned_voice_background( user_id: int,
         raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
     return "received a request to create convertvideo_with_owned_voice"
 
-@router.post("/convertvideo_LipSyncer/")
-async def convertvideo_LipSyncer( user_id:int,
-                        user_name:str, 
-                        role_id:int,
-                       audio: UploadFile = File(...),
-                       video: UploadFile = File(...)
-                       ):
-    # config
-    # output_video_encoder = 'hevc_nvenc'
-    output_video_quality = 100
-    execution_providers = 'cuda' if is_gpu_available() else 'cpu'
+# @router.post("/convertvideo_LipSyncer/")
+# async def convertvideo_LipSyncer( user_id:int,
+#                         user_name:str, 
+#                         role_id:int,
+#                         video_id: int,
+#                        audio: UploadFile = File(...),
+#                        video: UploadFile = File(...)
+#                        ):
+#     # config
+#     # output_video_encoder = 'hevc_nvenc'
+#     output_video_quality = 100
+#     execution_providers = 'cuda' if is_gpu_available() else 'cpu'
     
-    if not audio.content_type.startswith("audio/"):
-        raise HTTPException(status_code=400, detail="Only audio uploads allowed!")
+#     if not audio.content_type.startswith("audio/"):
+#         raise HTTPException(status_code=400, detail="Only audio uploads allowed!")
 
-    if not video.content_type.startswith("video/"):
-        raise HTTPException(status_code=400, detail="Only video uploads allowed!")
+#     if not video.content_type.startswith("video/"):
+#         raise HTTPException(status_code=400, detail="Only video uploads allowed!")
 
-    upload_dir_media = os.path.join(folder_path,'media',f'user_id_{user_id:04d}')
-    if not os.path.exists(upload_dir_media):
-        os.makedirs(upload_dir_media)
-    number_order = len(os.listdir(upload_dir_media))
-    upload_dir_media = os.path.join(upload_dir_media,f'{number_order:05d}')
+#     upload_dir_media = os.path.join(folder_path,'media',f'user_id_{user_id:04d}')
+#     if not os.path.exists(upload_dir_media):
+#         os.makedirs(upload_dir_media)
+#     number_order = len(os.listdir(upload_dir_media))
+#     upload_dir_media = os.path.join(upload_dir_media,f'{number_order:05d}')
     
-    # print(upload_dir_media)
-    if not os.path.exists(upload_dir_media):
-        os.makedirs(upload_dir_media)
+#     # print(upload_dir_media)
+#     if not os.path.exists(upload_dir_media):
+#         os.makedirs(upload_dir_media)
 
-    # print(upload_dir_media)
-    index_audio = audio.filename.rfind('.')
-    file_path_audio = upload_dir_media+f'/audio_{user_id:04d}_{number_order:05d}'+audio.filename[index_audio:]
+#     # print(upload_dir_media)
+#     index_audio = audio.filename.rfind('.')
+#     file_path_audio = upload_dir_media+f'/audio_{user_id:04d}_{number_order:05d}'+audio.filename[index_audio:]
 
-    try:
-        with open(file_path_audio, "wb") as buffer:
-            content = await audio.read()
-            buffer.write(content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save audio: {e}")
+#     try:
+#         with open(file_path_audio, "wb") as buffer:
+#             content = await audio.read()
+#             buffer.write(content)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to save audio: {e}")
 
-    index_video = video.filename.rfind('.')
-    file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
-    try:
-        with open( file_path_video, "wb") as buffer:
-            content = await video.read()
-            buffer.write(content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
+#     index_video = video.filename.rfind('.')
+#     file_path_video=upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#     try:
+#         with open( file_path_video, "wb") as buffer:
+#             content = await video.read()
+#             buffer.write(content)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
 
-    try:
-        output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
-        command = [
-            "python", "run.py", "--headless",
-            "--source", f"{file_path_audio}",
-            "--target", f"{file_path_video}",
-            "--output", f"{output}",
-            "--execution-provider", f'{execution_providers}',
-            # "--output-video-encoder", f"{output_video_encoder}",
-            "--frame-processors", "lip_syncer"
-            # "--frame-processors", "lip_syncer", "face_enhancer"
-        ]
-        result = subprocess.run(command)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
-    output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_final'+video.filename[index_video:]
-    # concatenateWarning(video_path=output,output_path= output_final)
-    link_url = f'/convertfile/filevideo/?path={output_final}'
+#     try:
+#         output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
+#         command = [
+#             "python", "run.py", "--headless",
+#             "--source", f"{file_path_audio}",
+#             "--target", f"{file_path_video}",
+#             "--output", f"{output}",
+#             "--execution-provider", f'{execution_providers}',
+#             # "--output-video-encoder", f"{output_video_encoder}",
+#             "--frame-processors", "lip_syncer", "face_enhancer"
+#             # "--frame-processors", "lip_syncer", "face_enhancer"
+#         ]
+#         result = subprocess.run(command)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f'Faild to convert video {e}')
+#     output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_final'+video.filename[index_video:]
+#     # concatenateWarning(video_path=output,output_path= output_final)
+#     link_url = f'/convertfile/filevideo/?path={output_final}'
     
-    None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
-    size_file, duration =  get_file_size_and_duration(output_final)
-    insert_data_into_media_table(user_id=user_id,
-        type='Video Lip Syncer', 
-        input_image_path=None,
-        input_video_path=file_path_video, 
-        input_voice_path=file_path_audio, 
-        output_video_path=output, 
-        size=size_file, 
-        time=duration)
-    return VideoResponse(
-        userId= f"{user_id}",
-        videoUrl= f"{link_url}",
-        size = size_file
-    )
+#     None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
+#     size_file, duration =  get_file_size_and_duration(output_final)
+#     insert_data_into_media_table(user_id=user_id,
+#         type='Video Lip Syncer', 
+#         input_image_path=None,
+#         input_video_path=file_path_video, 
+#         input_voice_path=file_path_audio, 
+#         output_video_path=output, 
+#         size=size_file, 
+#         time=duration)
+#     return VideoResponse(
+#         userId= f"{user_id}",
+#         videoUrl= f"{link_url}",
+#         size = size_file
+#     )
 @router.post("/convertvideo_LipSyncer_background/")
 async def convertvideo_LipSyncer_background( user_id:int,
                         user_name:str, 
                         role_id:int,
+                        video_id: int,
                        audio: UploadFile = File(...),
                        video: UploadFile = File(...),
                        background_tasks: BackgroundTasks = BackgroundTasks()
@@ -615,8 +810,8 @@ async def convertvideo_LipSyncer_background( user_id:int,
     # config
     # output_video_encoder = 'hevc_nvenc'
     output_video_quality = 100
-    execution_providers = 'cuda' if is_gpu_available() else 'cpu'
-    
+    # execution_providers = 'cuda' if is_gpu_available() else 'cpu'
+    execution_providers = 'cuda'
     if not audio.content_type.startswith("audio/"):
         raise HTTPException(status_code=400, detail="Only audio uploads allowed!")
 
@@ -652,11 +847,13 @@ async def convertvideo_LipSyncer_background( user_id:int,
             buffer.write(content)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
-
+    output_file = upload_dir_media+f'/targetvideo_{user_id:04d}_{number_order:05d}_cut'+video.filename[index_video:]
+    cut_video_focus_audio(input_file_video = file_path_video, input_file_audio = file_path_audio, output_file = output_file)
+    file_path_video = output_file
     try:
         output = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}'+video.filename[index_video:]
         output_final = upload_dir_media + f'/processedvideo_{user_id:04d}_{number_order:05d}_final'+video.filename[index_video:]
-
+        print("da vao")
         command = [
             "python", "run.py", "--headless",
             "--source", f"{file_path_audio}",
@@ -664,14 +861,15 @@ async def convertvideo_LipSyncer_background( user_id:int,
             "--output", f"{output}",
             "--execution-provider", f'{execution_providers}',
             # "--output-video-encoder", f"{output_video_encoder}",
-            "--frame-processors", "lip_syncer"
-            # "--frame-processors", "lip_syncer", "face_enhancer"
+            # "--frame-processors", "lip_syncer"
+            "--frame-processors", "lip_syncer", "face_enhancer"
         ]
         background_tasks.add_task(heavy_task,
                 command = command, 
                 user_id = user_id, 
                 user_name = user_name, 
                 role_id = role_id, 
+                video_id = video_id,
                 image_file_paths = None, 
                 file_path_video = file_path_video,
                 audio_file_paths = file_path_audio,
@@ -738,64 +936,112 @@ async def onvertvoice_withavailablevoice( user_id: int,
         size = size_file
     )
 
-def heavy_task(command, user_id, user_name, role_id, image_file_paths, file_path_video, audio_file_paths ,output,output_with_voice, output_final,type):
+def heavy_task(command, user_id, user_name, video_id, role_id, image_file_paths, file_path_video, audio_file_paths ,output,output_with_voice, output_final,type):
+    print("heavy_task")
     if type == "video deepfake without voice":
         result = subprocess.run(command)
         concatenateWarning(video_path=output,output_path= output_final)
-        link_url = f'/convertfile/filevideo/?path={output_final}'
+        link_url = f'{LINK_SERVER}/convertfile/filevideo/?path={output_final}'
         None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
         size_file, duration =  get_file_size_and_duration(output_final)
-        insert_data_into_media_table(user_id=user_id,
+        insert_data_into_media_table(id = video_id,
+            user_id=user_id,
             type='video deepfake with voice', 
             input_image_path=str(image_file_paths),
             input_video_path=file_path_video, 
             input_voice_path=audio_file_paths, 
-            output_video_path=output, 
+            output_video_path=output_final, 
             size=size_file, 
             time=duration)
         print(link_url)
+        send_video_chunked(FINISH_URL, str(video_id), output_final)
     elif type == "video deepfake with voice" :
+        result = subprocess.run(command)
         create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= output , output_path_video=output_with_voice)
         concatenateWarning(video_path=output_with_voice,output_path= output_final)
         print("with voice")
-        link_url = f'/convertfile/filevideo/?path={output_final}'
+        link_url = f'{LINK_SERVER}/convertfile/filevideo/?path={output_final}'
         None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
         size_file, duration =  get_file_size_and_duration(output_final)
-        insert_data_into_media_table(user_id=user_id,
+        insert_data_into_media_table(id = video_id,
+            user_id=user_id,
             type='video deepfake with voice', 
             input_image_path=str(image_file_paths),
             input_video_path=file_path_video, 
             input_voice_path=str(audio_file_paths), 
-            output_video_path=output, 
+            output_video_path=output_final, 
             size=size_file, 
             time=duration)
         print(link_url)
+        send_video_chunked(FINISH_URL, str(video_id), output_final)
     elif type == "Video convert own voice":
         create_video_with_voice_cloning(user_id=str(user_id), files= audio_file_paths, video_file_path= file_path_video,output_path_video=output)
         concatenateWarning(video_path=output,output_path= output_final)
-        link_url = f'/convertfile/filevideo/?path={output_final}'
+        link_url = f'{LINK_SERVER}/convertfile/filevideo/?path={output_final}'
         None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
         size_file, duration =  get_file_size_and_duration(output_final)
-        insert_data_into_media_table(user_id=user_id,
+        insert_data_into_media_table(id = video_id,
+            user_id=user_id,
             type='Video convert own voice', 
             input_image_path=None,
             input_video_path=file_path_video, 
             input_voice_path=audio_file_paths, 
-            output_video_path=output, 
+            output_video_path=output_final, 
             size=size_file, 
             time=duration)
         print(link_url)
+        send_video_chunked(FINISH_URL, str(video_id), output_final)
     elif type ==  'Video Lip Syncer':   
+        print("start Video Lip Syncer")
         result = subprocess.run(command)
+        concatenateWarning(video_path=output,output_path= output_final)
         None if check_user_exists else insert_data_into_users_table(id=user_id, username=user_name, role_id=role_id)
         size_file, duration =  get_file_size_and_duration(output_final)
-        link_url = f'/convertfile/filevideo/?path={output_final}'
-        insert_data_into_media_table(user_id=user_id,
+        link_url = f'{LINK_SERVER}/convertfile/filevideo/?path={output_final}'
+        insert_data_into_media_table(id = video_id,
+                user_id=user_id,
                 type='Video Lip Syncer', 
                 input_image_path=None,
                 input_video_path=file_path_video, 
                 input_voice_path=audio_file_paths, 
-                output_video_path=output, 
+                output_video_path=output_final, 
                 size=size_file, 
                 time=duration)   
         print(link_url)
+        send_video_chunked(FINISH_URL, str(video_id), output_final)
+    # print("video_id",video_id, type(video_id))    
+    # send_video_chunked(FINISH_URL, str(video_id), output_video_path)
+
+@router.post("/remove_noise_audio/")
+async def romove_noise_audio( user_id :int,
+                            audio: UploadFile = File(...)):
+    if not audio.content_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="Only audio uploads allowed!")
+    upload_dir_media = os.path.join(folder_path,'media',f'user_id_{user_id:04d}')
+    if not os.path.exists(upload_dir_media):
+        os.makedirs(upload_dir_media)
+    number_order = len(os.listdir(upload_dir_media))
+    upload_dir_media = os.path.join(upload_dir_media,f'{number_order:05d}')
+    
+    if not os.path.exists(upload_dir_media):
+        os.makedirs(upload_dir_media)
+
+    index_audio = audio.filename.rfind('.')
+    file_path_audio = upload_dir_media+f'/audio_{user_id:04d}_{number_order:05d}'+audio.filename[index_audio:]
+    
+    try:
+        with open(file_path_audio, "wb") as buffer:
+            content = await audio.read()
+            buffer.write(content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save audio: {e}")
+    output = upload_dir_media + f'/processedaudio_{user_id:04d}_{number_order:05d}'+audio.filename[index_audio:]
+    print(file_path_audio)
+    remove_noise_audio(file_path_audio,output)
+    size = os.path.getsize(output)
+    file_size_mb = size/(1024 * 1024)
+    return VideoResponse(
+        userId= f"{user_id}",
+        videoUrl= f'{LINK_SERVER}/convertfile/filevideo/?path={output}',
+        size = f'{round(file_size_mb,2)}'
+    )

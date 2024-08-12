@@ -6,46 +6,64 @@ import os
 import typing
 from typing import Iterator, Optional, Union
 
-from elevenlabs import play
+from elevenlabs import play, save
 from elevenlabs.client import ElevenLabs
 from moviepy.editor import VideoFileClip, AudioFileClip
 
 sys.path.append(str(Path(__file__).parent.parent))
 PARENT_PATH = str(Path(__file__).parent)
 
-# key = '33828ef4c5e064103aba7abdbad41b05'
-# 33828ef4c5e064103aba7abdbad41b05
-KEY = '33828ef4c5e064103aba7abdbad41b05'
+KEY = 
 def main():
     client = ElevenLabs(
-        api_key=KEY,
+        api_key= KEY ,
     )
     response = client.voices.get_all()
-    print(len(response.voices))
-    # voice = client.clone(
-    #     name="Ronaldo",
-    #     files=["./ronaldo_speake.mp3"],
-    # )
+    for voice in response.voices:
+        print(voice.voice_id)
+
+def remove_noise_audio(audio_path, output_path):
+    client = ElevenLabs(
+        api_key= KEY ,
+    )
+    audio = client.audio_isolation.audio_isolation(audio = open(audio_path, "rb"))
+    save(audio,output_path)
+
+def get_voice_by_userid(userid:str):
+    userid = str(userid)
+    client = ElevenLabs(
+            api_key=KEY,
+        )
+    response = client.voices.get_all()
+    for idx, voice in enumerate(response.voices):
+        if voice.name == userid:
+            return voice
+    return None
+
+def get_id_voice_by_userid(userid:str):
+    voice = get_voice_by_userid(userid)
+    return voice.voice_id if voice else None
+def delete_voice_by_userid(userid:str):
+    userid = str(userid)
+    client = ElevenLabs(
+            api_key=KEY,
+        )
+    id_voice = get_id_voice_by_userid(userid)
+    if id_voice == None:
+        # print("userid is not exist")
+        return
+    else:
+         client.voices.delete(
+            voice_id=id_voice,
+        )
     
-    # files = ["./ronaldo_speake.mp3"]
-    # add_voice_response =client.voices.add(
-    #     name="CR7",
-    #     files = [open(file, "rb") for file in files]
-    # )    
-
-    # print(PARENT_PATH)
-    
-
-    # convert_audio_of_video(api_key=KEY, voice_id=add_voice_response.voice_id, video_file_path="/home/viet/workspace/AI_SERVER_VDH/voice/video_30s.mp4", output_path_video="./test_output.mp4")
-    # os.remove('/home/viet/workspace/AI_SERVER_VDH/voice/temp.mp3')
-    # create_video_with_voice_cloning(user_id=str('123'), files= ["abc"], video_file_path= "/home/viet/workspace/AI_SERVER_VDH/media/user_id_0123/00005/targetvideo_0123_00005.mp4",output_path_video='./videotest.mp4')
-
-    
-
 def create_video_with_voice_cloning(user_id:int ,files: typing.List[str], video_file_path:str , output_path_video:str):
+    print("Starting Cloning Voice")
     client = ElevenLabs(
         api_key=KEY,
     )
+    # clear old voice if exist
+    delete_voice_by_userid(user_id)
     add_voice_response =client.voices.add(
         name= user_id,
         files = [open(file, "rb") for file in files]

@@ -27,7 +27,7 @@ Usage
 -----
 Run the command
 ```  
-    mkdir -p logs/http.log
+    mkdir -p logs && touch logs/http.log
     python server.py
 ```
 
